@@ -3,7 +3,7 @@
     Simplified Packet Analysis Programming Projects
     Designed By:        Dr. Mohamed Aboutabl  (c) 2026
     
-    Implemented By:     Alyssa Girard
+    Implemented By:     Jed Miller & Alyssa Girard
     File Name:          mypcap.c
 
 ---------------------------------------------------------------------------*/
@@ -265,7 +265,8 @@ bool getNextPacket( packetHdr_t *p , uint8_t  ethFrame[]  )
         p->ts_usec = swapbytes_32(p->ts_usec);
         p->incl_len = swapbytes_32(p->incl_len);
         p->orig_len = swapbytes_32(p->orig_len);
-        
+        // etherHdr_t *eth = (etherHdr_t *) ethFrame;
+        // eth->eth_type = swapbytes_16(eth->eth_type);
     }
     
     // Read 'incl_len' bytes from the PCAP file into the ethFrame[]
@@ -274,6 +275,7 @@ bool getNextPacket( packetHdr_t *p , uint8_t  ethFrame[]  )
     {
         return false;
     }
+    // arp stuff?
 
     // If necessary, set the baseTime .. Pay attention to possibility of nano second 
     // time precision (instead of micro seconds )
@@ -339,8 +341,97 @@ void printPacket( const etherHdr_t *frPtr )
 
 
     // Prot
+    if (frPtr->eth_type == 1544) {
+        // does not work if i replace 1544 with proto_ipv4 which is weird,
+        // tried to swap the bytes but its not rly working out well even tho like how the bytes work it should
+        printf("ARP");
+
+
+
+    } else if (frPtr->eth_type == PROTO_IPv4) {
+        // todo add in if statement that checks the ipv4 header
+    }
     // printf("%u", frPtr->eth_type);
 
+
+}
+
+void printARPinfo( const arpMsg_t  *m ) 
+{
+
+
+    // size_t htype;
+    // size_t ptype;
+    // size_t hlen;
+    // size_t plen;
+    // size_t oper;
+    // size_t sha;
+    // size_t spa;
+    // size_t tha;
+    // size_t tpa;
+
+    // htype = fread(&m->arp_htype, sizeof(m->arp_htype), 1, pcapInput);
+    // if (htype != 1) 
+    // {
+    //     return false;
+    // }
+
+    // ptype = fread(&m->arp_ptype, sizeof(m->arp_ptype), 1, pcapInput);
+    // if (ptype != 1) 
+    // {
+    //     return false;
+    // }
+
+    // hlen = fread(&m->arp_hlen, sizeof(m->arp_hlen), 1, pcapInput);
+    // if (hlen != 1) 
+    // {
+    //     return false;
+    // }
+
+    // plen = fread(&m->arp_plen, sizeof(m->arp_plen), 1, pcapInput);
+    // if (plen != 1) 
+    // {
+    //     return false;
+    // }
+
+    // oper = fread(&m->arp_oper, sizeof(m->arp_oper), 1, pcapInput);
+    // if (oper != 1) 
+    // {
+    //     return false;
+    // }
+
+    // sha = fread(&m->arp_sha, sizeof(m->arp_sha), 1, pcapInput);
+    // if (sha != 1) 
+    // {
+    //     return false;
+    // }
+
+    // spa = fread(&m->arp_spa, sizeof(m->arp_spa), 1, pcapInput);
+    // if (spa != 1) 
+    // {
+    //     return false;
+    // }
+
+    // tha = fread(&m->arp_tha, sizeof(m->arp_tha), 1, pcapInput);
+    // if (tha != 1) 
+    // {
+    //     return false;
+    // }
+
+    // tpa = fread(&m->arp_tpa, sizeof(m->arp_tpa), 1, pcapInput);
+    // if (tpa != 1) 
+    // {
+    //     return false;
+    // }
+}
+
+void printIPinfo ( const ipv4Hdr_t * )
+{
+
+}
+
+unsigned printICMPinfo( const icmpHdr_t * )
+{
 
 }
 
@@ -351,6 +442,12 @@ void printPacket( const etherHdr_t *frPtr )
 
 
 /*-------------------------------------------------------------------------*/
+char *ipToStr( const IPv4addr ip , char *ipStr  )
+{
+    sprintf(ipStr, "%u.%u.%u.%u", ip.byte[0], ip.byte[1], ip.byte[2], ip.byte[3]);
+    return ipStr;
+}
+
 /*  Convert a MAC address to the format xx:xx:xx:xx:xx:xx 
     in the caller-provided 'buf' whose maximum 'size' is given
     Returns 'buf'  */

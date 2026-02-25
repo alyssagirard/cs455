@@ -3,7 +3,7 @@
     Simplified Packet Analysis Programming Projects
     Designed By:        Dr. Mohamed Aboutabl  (c) 2026
     
-    Implemented By:     Alyssa Girard
+    Implemented By:     Jed Miller & Alyssa Girard
     File Name:          p1.c
 
 ---------------------------------------------------------------------------*/
@@ -25,6 +25,10 @@ int main( int argc  , char *argv[] )
     packetHdr_t  pktHdr  ;
     uint8_t      ethFrame[MAXFRAMESZ] ;
     etherHdr_t  *frameHdrPtr = (etherHdr_t  *) ethFrame ;
+    ipv4Hdr_t    ipv4Hdr ;
+    arpMsg_t     arpMsg ;
+    icmpHdr_t    icmpHdr ;
+
     
     if ( argc < 2 )
     {
@@ -65,6 +69,23 @@ int main( int argc  , char *argv[] )
         // Use packetPrint( ) to print the actual content of the packet starting at the
         // ethernet level and up
         printPacket(frameHdrPtr);
+
+        // ARP protocol allegedly
+        if (frameHdrPtr->eth_type == 1544 )
+        {
+            printARPinfo( &arpMsg );
+            
+        // is tcp or udp or icmp??? example pcap files say ipv4
+        } else if (frameHdrPtr->eth_type == PROTO_IPv4 )
+        {
+            printIPinfo( &ipv4Hdr);
+            
+        }
+
+        // if protocol is arp, then run printarpinfo
+        // if protocol is icmp, then run printicmp
+        // if protocol is tcp or udp, print ipinfo?
+
         puts("");       
         i++;
     }
