@@ -24,10 +24,11 @@ int main( int argc  , char *argv[] )
     pcap_hdr_t   pcapHdr ;
     packetHdr_t  pktHdr  ;
     uint8_t      ethFrame[MAXFRAMESZ] ;
+
+    // Convinient pointers to specific parts of the data
     etherHdr_t  *frameHdrPtr = (etherHdr_t  *) ethFrame ;
-    ipv4Hdr_t    ipv4Hdr ;
-    arpMsg_t     arpMsg ;
-    icmpHdr_t    icmpHdr ;
+    arpMsg_t    *arpBody  = (arpMsg_t *)  (ethFrame + sizeof(etherHdr_t));
+    ipv4Hdr_t   *ipv4Body = (ipv4Hdr_t *) (ethFrame + sizeof(etherHdr_t));
 
     
     if ( argc < 2 )
@@ -70,18 +71,22 @@ int main( int argc  , char *argv[] )
         // ethernet level and up
         printPacket(frameHdrPtr);
 
-        // ARP protocol allegedly
-        if (frameHdrPtr->eth_type == 1544 )
+        // Print the protocol
+        /* 46<=eth_type<=1500 ? Payload Len : Protocol */
+        switch (ntohs(frameHdrPtr->eth_type))
         {
-            printARPinfo( &arpMsg );
-            
-        // is tcp or udp or icmp??? example pcap files say ipv4
-        } else if (frameHdrPtr->eth_type == PROTO_IPv4 )
-        {
-            printIPinfo( &ipv4Hdr);
-            
-        }
+        case PROTO_ARP:
+            printARPinfo(arpBody);
+            break;
 
+        case PROTO_IPv4:
+            printIPinfo(ipv4Body);
+            break;
+        
+        default:
+            printf("UNKNOWN_PROTOCOL: %d", frameHdrPtr->eth_type);
+            break;
+        }
         // if protocol is arp, then run printarpinfo
         // if protocol is icmp, then run printicmp
         // if protocol is tcp or udp, print ipinfo?

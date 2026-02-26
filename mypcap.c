@@ -10,6 +10,9 @@
 
 #include "mypcap.h"
 
+// Custom utilities
+char *ipHeaderToStr(const ipv4Hdr_t *ip_header , char *headerStr);
+
 /*-----------------   GLOBAL   VARIABLES   --------------------------------*/
 FILE       *pcapInput  =  NULL ;        // The input PCAP file
 bool        bytesOK ;   // Does the capturer's byte ordering same as mine?
@@ -69,115 +72,60 @@ void cleanUp( )
 
 int readPCAPhdr( char *fname , pcap_hdr_t *p)
 {
-	// Always check for incoming NULL pointers
-    if (fname == NULL)
+    if (fname == NULL || p == NULL) 
     {
-        printf("fname is null\n");
         return -1;
     }
 
-    if (p == NULL)
-    {
-        printf("p is null\n");
+    // Open the file
+    pcapInput = fopen(fname, "r");
+
+    // Read the file header
+    if (fread(p, sizeof(pcap_hdr_t), 1, pcapInput) != 1) {
         return -1;
     }
 
-    size_t mnum_read;
-    size_t v_ma;
-    size_t v_mi;
-    size_t tz;
-    size_t sf;
-    size_t sl;
-    size_t nw;
+    // Check the magic number
+    // 
+    // This checks the two cases to find the timestamp format. It also checks them in reverse to
+    // see if the file was writen using a different endianess than the current machine 
+    // reading the file
+    #define MICROSEC_MAGIC_NUMBER 0xA1B2C3D4
+    #define NANOSEC_MAGIC_NUMBER 0xA1B23C4D
 
-
-	// Successfully open the input 'fname'
-    pcapInput = fopen(fname, "rb");
-    if (pcapInput == NULL) 
+    switch (p->magic_number)
     {
-        printf("PCAP input is null\n");
-        return -1;
-    }
-
-    //read input into the global header
-    mnum_read = fread(&p->magic_number, sizeof(p->magic_number), 1, pcapInput);
-    if (mnum_read != 1){
-        return -1;
-    } 
-
-    v_ma = fread(&p->version_major, sizeof(p->version_major), 1, pcapInput);
-    if (v_ma != 1) {
-        return -1;
-    } 
-    v_mi = fread(&p->version_minor, sizeof(p->version_minor), 1, pcapInput);
-    if (v_mi != 1) {
-        return -1;
-    } 
-
-    tz = fread(&p->thiszone, sizeof(p->thiszone), 1, pcapInput);
-    if (tz != 1) {
-        return -1;
-    } 
-
-    sf = fread(&p->sigfigs, sizeof(p->sigfigs), 1, pcapInput);
-    if (sf != 1) {
-        return -1;
-    } 
-
-    sl = fread(&p->snaplen, sizeof(p->snaplen), 1, pcapInput);
-    if (sl != 1) {
-        return -1;
-    } 
-
-    nw = fread(&p->network, sizeof(p->network), 1, pcapInput);
-    if (nw != 1) {
-        return -1;
-    } 
-
-    // Determine the capturer's byte ordering
-    // Issue: magic_number could also be 0xa1b23c4D to indicate nano-second 
-    // resolution instead of microseconds. This affects the interpretation
-    // of the ts_usec field in each packet's header.
-
-    // AKA Properly set the global flags: bytesOK  and   microSec
-    // printf("p->magic_number: %x\n", p->magic_number);
-
-    if (p->magic_number == 0xa1b2c3d4){
-        //microseconds,little endian
-        bytesOK = true;
+    // Host ordered
+    case MICROSEC_MAGIC_NUMBER:
         microSec = true;
-
-    }else if (p->magic_number == 0xd4c3b2a1){
-        //microsecondss, big endian
-        bytesOK = false;
-        microSec = true;
-
-    }else if (p->magic_number == 0xa1b23c4d) {
-        // nanoseconds, little endian
         bytesOK = true;
+        break;
+    case NANOSEC_MAGIC_NUMBER:
         microSec = false;
-    } else if(p->magic_number == 0x4d3cb2a1) {
-        //nanoseconds, swapped
+        bytesOK = true;
+        break;
+    // Reverse order
+    case __builtin_bswap32(MICROSEC_MAGIC_NUMBER):
+        microSec = true;
         bytesOK = false;
+        break;
+    case __builtin_bswap32(NANOSEC_MAGIC_NUMBER):        
         microSec = false;
-
-    } else {
-        printf("Unrecognized magic number\n");
+        bytesOK = false;
+        break;
+    default:
         return -1;
     }
 
-    if( ! bytesOK )
-    {
-        // reorder the bytes of the fields in this packet header
-        p->version_major = swapbytes_16(p->version_major);
-        p->version_minor = swapbytes_16(p->version_minor);
-        p->thiszone = swapbytes_32(p->thiszone);
-        p->sigfigs = swapbytes_32(p->sigfigs);
-        p->snaplen = swapbytes_32(p->snaplen);
-        p->network = swapbytes_32(p->network);
+    // Fix the header if the endianess is wrong
+    if (! bytesOK) {
+        p->version_major = __builtin_bswap16(p->version_major);
+        p->version_minor = __builtin_bswap16(p->version_minor);
+        p->thiszone      = __builtin_bswap32(p->thiszone);
+        p->sigfigs       = __builtin_bswap32(p->sigfigs);
+        p->snaplen       = __builtin_bswap32(p->snaplen);
+        p->network       = __builtin_bswap32(p->network);
     }
-
-    return 0;
 }
 
 /*-------------------------------------------------------------------------*/
@@ -210,87 +158,41 @@ void printPCAPhdr( const pcap_hdr_t *p )
 
 bool getNextPacket( packetHdr_t *p , uint8_t  ethFrame[]  )
 {
-    // Check for incoming NULL pointers
-    if (p == NULL)
-    {
-        printf("p is null\n");
+    if (p == NULL || ethFrame == NULL) {
         return false;
     }
 
-    if (ethFrame == NULL)
-    {
-        printf("ethframe is null\n");
+    if(fread(p, sizeof(packetHdr_t), 1, pcapInput) != 1) {
         return false;
     }
 
-    
-    size_t tssec;
-    size_t tsusec;
-    size_t ilen;
-    size_t olen;
-
-
-    // Read the header of the next packet in the PCAP file
-
-    tssec = fread(&p->ts_sec, sizeof(p->ts_sec), 1, pcapInput);
-    if (tssec != 1) 
+    // Check if bytes need to be reordered to match endianess
+    if( ! bytesOK )   
     {
-        return false;
-    }
-
-    tsusec = fread(&p->ts_usec, sizeof(p->ts_usec), 1, pcapInput);
-    if (tsusec != 1) 
-    {
-        return false;
-    }
-
-    ilen = fread(&p->incl_len, sizeof(p->incl_len), 1, pcapInput);
-    if (ilen != 1) 
-    {
-        return false;
-    }
-
-    olen = fread(&p->orig_len, sizeof(p->orig_len), 1, pcapInput);
-    if (olen != 1) 
-    {
-        return false;
-    }
-
-    // Did the capturer use a different 
-    // byte-ordering than mine (as determined by the magic number)?
-    if( ! bytesOK )   // TODO
-    {
-        // reorder the bytes of the fields in this packet header
-        p->ts_sec = swapbytes_32(p->ts_sec);
-        p->ts_usec = swapbytes_32(p->ts_usec);
-        p->incl_len = swapbytes_32(p->incl_len);
-        p->orig_len = swapbytes_32(p->orig_len);
-        // etherHdr_t *eth = (etherHdr_t *) ethFrame;
-        // eth->eth_type = swapbytes_16(eth->eth_type);
+        p->ts_sec   = __builtin_bswap32(p->ts_sec);
+        p->ts_usec  = __builtin_bswap32(p->ts_usec);
+        p->incl_len = __builtin_bswap32(p->incl_len);
+        p->orig_len = __builtin_bswap32(p->orig_len);
     }
     
     // Read 'incl_len' bytes from the PCAP file into the ethFrame[]
-    fread(ethFrame, 1, p->incl_len, pcapInput);
-    if (p->incl_len > MAXFRAMESZ) 
-    {
+    if (fread(ethFrame, p->incl_len, 1, pcapInput) != 1) {
         return false;
     }
-    // arp stuff?
 
-    // If necessary, set the baseTime .. Pay attention to possibility of nano second 
-    // time precision (instead of micro seconds )
-    if (!baseTimeSet) 
-    {
-        if (!microSec) 
-        { // if in nanoseconds
-            baseTime = (p->ts_usec / 1000000000.0) + p->ts_sec;
-            baseTimeSet = true;
-        } else 
-        { // If in microseconds
-            baseTime = (p->ts_usec / 1000000.0) + p->ts_sec;
-            baseTimeSet = true;
+    // Set the baseTime if it isn't set
+    if (! baseTimeSet) {
+        baseTimeSet = true;
+
+        if (microSec) {
+            // Microseconds
+            baseTime = (p->ts_sec * 1.0) + (p->ts_usec * 0.000001);
+        } else {
+            // Nanoseconds
+            baseTime = (p->ts_sec * 1.0) + (p->ts_usec * 0.000000001);
         }
     }
+    
     return true ;
 }
 
@@ -338,101 +240,83 @@ void printPacket( const etherHdr_t *frPtr )
     char dest[18];
     macToStr(frPtr->eth_dstMAC, dest);
     printf("%s    ", dest);
+}
 
+void printARPinfo( const arpMsg_t *m ) 
+{
+    printf("ARP      ");
 
-    // Prot
-    if (frPtr->eth_type == 1544) {
-        // does not work if i replace 1544 with proto_ipv4 which is weird,
-        // tried to swap the bytes but its not rly working out well even tho like how the bytes work it should
-        printf("ARP");
+    char senderIp[16];
+    char destinationIp[16];
+    char senderMac[18];
 
-
-
-    } else if (frPtr->eth_type == PROTO_IPv4) {
-        // todo add in if statement that checks the ipv4 header
+    switch (ntohs(m->arp_oper))
+    {
+    case ARPREQUEST:
+        printf("Who has %s ? Tell %s",
+            ipToStr(m->arp_tpa, destinationIp),
+            ipToStr(m->arp_spa, senderIp)
+        );
+        break;
+    case ARPREPLY:
+        printf("%s is at %s",
+            ipToStr(m->arp_spa, senderIp),
+            macToStr(m->arp_sha, senderMac)
+        );
+        break;
+    default:
+        printf("ARP_ERROR");
+        break;
     }
-    // printf("%u", frPtr->eth_type);
-
-
 }
 
-void printARPinfo( const arpMsg_t  *m ) 
+void printIPinfo ( const ipv4Hdr_t *ipHeader )
 {
+    switch (ipHeader->ip_proto)
+    {
+    case PROTO_ICMP:
+        printf("ICMP     ");
 
 
-    // size_t htype;
-    // size_t ptype;
-    // size_t hlen;
-    // size_t plen;
-    // size_t oper;
-    // size_t sha;
-    // size_t spa;
-    // size_t tha;
-    // size_t tpa;
+        char ip_header_buffer[64];
+        printf("%s ",
+            ipHeaderToStr(ipHeader, ip_header_buffer)
+        );
 
-    // htype = fread(&m->arp_htype, sizeof(m->arp_htype), 1, pcapInput);
-    // if (htype != 1) 
-    // {
-    //     return false;
-    // }
 
-    // ptype = fread(&m->arp_ptype, sizeof(m->arp_ptype), 1, pcapInput);
-    // if (ptype != 1) 
-    // {
-    //     return false;
-    // }
+        // Take the start of ip header, add the header length, cast to ICMP header
+        icmpHdr_t *icmp_header = (icmpHdr_t*)((uint8_t*)ipHeader + (ipHeader->ip_verHlen & 0x0F) * 4);
 
-    // hlen = fread(&m->arp_hlen, sizeof(m->arp_hlen), 1, pcapInput);
-    // if (hlen != 1) 
-    // {
-    //     return false;
-    // }
+        // These two lines select a pointer into the array, cast it to a number, and then adjust for network ordering
+        uint16_t sequence_number = ntohs(*(uint16_t*)&icmp_header->icmp_line2[2]);
+        uint16_t id_number = ntohs(*(uint16_t*)&icmp_header->icmp_line2);
 
-    // plen = fread(&m->arp_plen, sizeof(m->arp_plen), 1, pcapInput);
-    // if (plen != 1) 
-    // {
-    //     return false;
-    // }
+        printf("ICMP_HDR{ %-12s :id= %d, seq=%5d} ",
+            // TODO: Error check other types?
+            icmp_header->icmp_type == ICMP_ECHO_REQUEST ? "Echo Request" : "Echo Reply",
+            id_number,
+            sequence_number
+        );
 
-    // oper = fread(&m->arp_oper, sizeof(m->arp_oper), 1, pcapInput);
-    // if (oper != 1) 
-    // {
-    //     return false;
-    // }
 
-    // sha = fread(&m->arp_sha, sizeof(m->arp_sha), 1, pcapInput);
-    // if (sha != 1) 
-    // {
-    //     return false;
-    // }
+        break;
+    case PROTO_TCP:
+        break;
 
-    // spa = fread(&m->arp_spa, sizeof(m->arp_spa), 1, pcapInput);
-    // if (spa != 1) 
-    // {
-    //     return false;
-    // }
+    case PROTO_UDP:
+        break;
+    
+    default:
+        printf("UNKNOWN_PROTOCOL");
+        break;
+    }
 
-    // tha = fread(&m->arp_tha, sizeof(m->arp_tha), 1, pcapInput);
-    // if (tha != 1) 
-    // {
-    //     return false;
-    // }
-
-    // tpa = fread(&m->arp_tpa, sizeof(m->arp_tpa), 1, pcapInput);
-    // if (tpa != 1) 
-    // {
-    //     return false;
-    // }
-}
-
-void printIPinfo ( const ipv4Hdr_t * )
-{
-
+    return;
 }
 
 unsigned printICMPinfo( const icmpHdr_t * )
 {
-
+    return 1;
 }
 
 
@@ -456,4 +340,17 @@ char *macToStr( const uint8_t *p , char *buf )
 {
     sprintf(buf, "%02x:%02x:%02x:%02x:%02x:%02x", p[0], p[1], p[2], p[3], p[4], p[5]);
     return buf;
+}
+
+/* headerStr needs to be at least 39 bytes long */
+char *ipHeaderToStr(const ipv4Hdr_t *ip_header , char *headerStr)
+{
+    int ip_header_len = (ip_header->ip_verHlen & 0x0F) * 4;
+
+    sprintf(headerStr, "IP_HDR{ Len=%d incl. %d options bytes}",
+        ip_header_len,
+        ip_header_len - 20
+    );
+
+    return headerStr;
 }
