@@ -79,6 +79,7 @@ int readPCAPhdr( char *fname , pcap_hdr_t *p)
 
     // Open the file
     pcapInput = fopen(fname, "r");
+    
 
     // Read the file header
     if (fread(p, sizeof(pcap_hdr_t), 1, pcapInput) != 1) {
@@ -272,13 +273,23 @@ void printARPinfo( const arpMsg_t *m )
 
 void printIPinfo ( const ipv4Hdr_t *ipHeader )
 {
+    char srcStr[MAXIPv4ADDRLEN];
+    char dstStr[MAXIPv4ADDRLEN];
+
+    ipToStr(ipHeader->ip_srcIP, srcStr);
+    printf("%s    ", srcStr);
+
+    ipToStr(ipHeader->ip_dstIP, dstStr);
+    printf("%s    ", dstStr);
+
+    char ip_header_buffer[64];
     switch (ipHeader->ip_proto)
     {
     case PROTO_ICMP:
         printf("ICMP     ");
 
 
-        char ip_header_buffer[64];
+        // char ip_header_buffer[64];
         printf("%s ",
             ipHeaderToStr(ipHeader, ip_header_buffer)
         );
@@ -298,12 +309,64 @@ void printIPinfo ( const ipv4Hdr_t *ipHeader )
             sequence_number
         );
 
+        uint8_t icmp_hlen_bytes = (ipHeader->ip_verHlen & 0x0F) * 4;
+
+        uint16_t icmp_total_len = ntohs(ipHeader->ip_totLen);
+
+        uint16_t icmp_payload_len = icmp_total_len - icmp_hlen_bytes;
+
+        uint16_t icmp_data_len = icmp_payload_len - sizeof(icmp_header);
+
+        printf("AppData=   %d", icmp_data_len);
+
 
         break;
     case PROTO_TCP:
+        printf("TCP      ");
+
+        printf("%s ",
+            ipHeaderToStr(ipHeader, ip_header_buffer)
+        );
+        // TO FIX
+        
+
+        uint8_t tcp_hlen_bytes = (ipHeader->ip_verHlen & 0x0F) * 4;
+
+        uint16_t tcp_total_len = ntohs(ipHeader->ip_totLen);
+
+        uint16_t tcp_payload_len = tcp_total_len - tcp_hlen_bytes;
+
+        printf("AppData=   %d", tcp_payload_len);
+
         break;
 
     case PROTO_UDP:
+        printf("UDP      ");
+
+        printf("%s ",
+            ipHeaderToStr(ipHeader, ip_header_buffer)
+        );
+
+        // TO FIX
+
+        uint8_t udp_hlen_bytes = (ipHeader->ip_verHlen & 0x0F) * 4;
+
+        uint16_t udp_total_len = ntohs(ipHeader->ip_totLen);
+
+        uint16_t udp_payload_len = udp_total_len - udp_hlen_bytes - 8;
+
+        printf("AppData=   %d", udp_payload_len);
+        
+
+        // hlen_bytes = (ipHeader->ip_verHlen & 0x0F) * 4;
+
+        // // Subtract from ethernet header size
+        // payload_len = p->incl_len - sizeof(etherHdr_t) - hlen_bytes;
+        
+        // data_len = payload_len - 8;
+
+        // printf("AppData=   %d", data_len);
+
         break;
     
     default:

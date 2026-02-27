@@ -69,13 +69,12 @@ int main( int argc  , char *argv[] )
         //          Time is printed relative to the 1st packet's time
         // Use packetPrint( ) to print the actual content of the packet starting at the
         // ethernet level and up
-        printPacket(frameHdrPtr);
-
         // Print the protocol
         /* 46<=eth_type<=1500 ? Payload Len : Protocol */
         switch (ntohs(frameHdrPtr->eth_type))
         {
         case PROTO_ARP:
+            printPacket(frameHdrPtr);
             printARPinfo(arpBody);
             break;
 
