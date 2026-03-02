@@ -10,11 +10,11 @@ echo ""
 echo ""
 echo "- - - TEST 2 - - - - -"
 echo ""
-../p1 inputs/trafficIPoptions.pcap | diff - expected/expectedOutput2.txt
-../p1 inputs/trafficIPoptions.pcap > outputs/2.txt
+../p1 inputs/trafficUdpTcp.pcap | diff - expected/expectedOutput2.txt
+../p1 inputs/trafficUdpTcp.pcap > outputs/2.txt
 
 echo ""
 echo "- - - TEST 3 - - - - -"
 echo ""
-../p1 inputs/trafficUdpTcp.pcap | diff - expected/expectedOutput3.txt
-../p1 inputs/trafficUdpTcp.pcap > outputs/3.txt
+../p1 inputs/trafficIPoptions.pcap | diff - expected/expectedOutput3.txt
+../p1 inputs/trafficIPoptions.pcap > outputs/3.txt

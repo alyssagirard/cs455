@@ -63,7 +63,7 @@ int main( int argc  , char *argv[] )
     int i = 1;
     while ( getNextPacket(&pktHdr, &ethFrame[0]) )
     {
-        printf("     %d       ", i);
+        printf("%6d ", i);
         // Use packetMetaDataPrint() to print the packet header data; 
         printPacketMetaData(&pktHdr);
         //          Time is printed relative to the 1st packet's time

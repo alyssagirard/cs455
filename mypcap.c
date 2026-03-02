@@ -10,9 +10,6 @@
 
 #include "mypcap.h"
 
-// Custom utilities
-char *ipHeaderToStr(const ipv4Hdr_t *ip_header , char *headerStr);
-
 /*-----------------   GLOBAL   VARIABLES   --------------------------------*/
 FILE       *pcapInput  =  NULL ;        // The input PCAP file
 bool        bytesOK ;   // Does the capturer's byte ordering same as mine?
@@ -78,9 +75,12 @@ int readPCAPhdr( char *fname , pcap_hdr_t *p)
     }
 
     // Open the file
-    pcapInput = fopen(fname, "r");
-    
+    pcapInput = fopen(fname, "rb");
 
+    if (pcapInput == NULL) {
+        return -1;
+    }
+    
     // Read the file header
     if (fread(p, sizeof(pcap_hdr_t), 1, pcapInput) != 1) {
         return -1;
@@ -93,6 +93,8 @@ int readPCAPhdr( char *fname , pcap_hdr_t *p)
     // reading the file
     #define MICROSEC_MAGIC_NUMBER 0xA1B2C3D4
     #define NANOSEC_MAGIC_NUMBER 0xA1B23C4D
+    #define REVERSED_MICROSEC_MAGIC_NUMBER 0xD4C3B2A1
+    #define REVERSED_NANOSEC_MAGIC_NUMBER 0x4D3CB2A1
 
     switch (p->magic_number)
     {
@@ -106,11 +108,11 @@ int readPCAPhdr( char *fname , pcap_hdr_t *p)
         bytesOK = true;
         break;
     // Reverse order
-    case __builtin_bswap32(MICROSEC_MAGIC_NUMBER):
+    case REVERSED_MICROSEC_MAGIC_NUMBER:
         microSec = true;
         bytesOK = false;
         break;
-    case __builtin_bswap32(NANOSEC_MAGIC_NUMBER):        
+    case REVERSED_NANOSEC_MAGIC_NUMBER:        
         microSec = false;
         bytesOK = false;
         break;
@@ -120,13 +122,15 @@ int readPCAPhdr( char *fname , pcap_hdr_t *p)
 
     // Fix the header if the endianess is wrong
     if (! bytesOK) {
-        p->version_major = __builtin_bswap16(p->version_major);
-        p->version_minor = __builtin_bswap16(p->version_minor);
-        p->thiszone      = __builtin_bswap32(p->thiszone);
-        p->sigfigs       = __builtin_bswap32(p->sigfigs);
-        p->snaplen       = __builtin_bswap32(p->snaplen);
-        p->network       = __builtin_bswap32(p->network);
+        p->version_major = swapbytes_16(p->version_major);
+        p->version_minor = swapbytes_16(p->version_minor);
+        p->thiszone      = swapbytes_32(p->thiszone);
+        p->sigfigs       = swapbytes_32(p->sigfigs);
+        p->snaplen       = swapbytes_32(p->snaplen);
+        p->network       = swapbytes_32(p->network);
     }
+
+    return 0;
 }
 
 /*-------------------------------------------------------------------------*/
@@ -170,14 +174,14 @@ bool getNextPacket( packetHdr_t *p , uint8_t  ethFrame[]  )
     // Check if bytes need to be reordered to match endianess
     if( ! bytesOK )   
     {
-        p->ts_sec   = __builtin_bswap32(p->ts_sec);
-        p->ts_usec  = __builtin_bswap32(p->ts_usec);
-        p->incl_len = __builtin_bswap32(p->incl_len);
-        p->orig_len = __builtin_bswap32(p->orig_len);
+        p->ts_sec   = swapbytes_32(p->ts_sec);
+        p->ts_usec  = swapbytes_32(p->ts_usec);
+        p->incl_len = swapbytes_32(p->incl_len);
+        p->orig_len = swapbytes_32(p->orig_len);
     }
     
     // Read 'incl_len' bytes from the PCAP file into the ethFrame[]
-    if (fread(ethFrame, p->incl_len, 1, pcapInput) != 1) {
+    if (p->incl_len > MAXFRAMESZ || fread(ethFrame, p->incl_len, 1, pcapInput) != 1) {
         return false;
     }
 
@@ -216,12 +220,12 @@ void printPacketMetaData( const packetHdr_t *p  )
         time = time - baseTime; 
     }
 
-    printf("%.6f     ", time);
+    printf("%14.6f ", time);
     // OrgLen
-    printf("%d /     ", p->orig_len);
+    printf("%6d / ", p->orig_len);
 
     // Captrd
-    printf("%d ", p->incl_len);
+    printf("%6d ", p->incl_len);
 }
 
 /*-------------------------------------------------------------------------*/
@@ -245,7 +249,7 @@ void printPacket( const etherHdr_t *frPtr )
 
 void printARPinfo( const arpMsg_t *m ) 
 {
-    printf("ARP      ");
+    printf("%-8s ", "ARP");
 
     char senderIp[16];
     char destinationIp[16];
@@ -275,26 +279,41 @@ void printIPinfo ( const ipv4Hdr_t *ipHeader )
 {
     char srcStr[MAXIPv4ADDRLEN];
     char dstStr[MAXIPv4ADDRLEN];
+    char ip_header_print_buffer[64];
 
     ipToStr(ipHeader->ip_srcIP, srcStr);
-    printf("%s    ", srcStr);
+    printf("%-20s ", srcStr);
 
     ipToStr(ipHeader->ip_dstIP, dstStr);
-    printf("%s    ", dstStr);
+    printf("%-20s ", dstStr);
 
-    char ip_header_buffer[64];
     switch (ipHeader->ip_proto)
     {
     case PROTO_ICMP:
-        printf("ICMP     ");
+        printf("%-8s ", "ICMP");
+        break;
+    case PROTO_TCP:
+        printf("%-8s ", "TCP");
+        break;
+    case PROTO_UDP:
+        printf("%-8s ", "UDP");
+        break;
+    default:
+        printf("%-8s ", "UNKNOWN");
+    }
 
+    int ip_header_len = (ipHeader->ip_verHlen & 0x0F) * 4;
 
-        // char ip_header_buffer[64];
-        printf("%s ",
-            ipHeaderToStr(ipHeader, ip_header_buffer)
-        );
+    printf("IP_HDR{ Len=%d incl. %d options bytes} ",
+        ip_header_len,
+        ip_header_len - 20
+    );
 
+    uint8_t *start_of_data = (uint8_t*)ipHeader + ip_header_len;
 
+    switch (ipHeader->ip_proto)
+    {
+    case PROTO_ICMP:
         // Take the start of ip header, add the header length, cast to ICMP header
         icmpHdr_t *icmp_header = (icmpHdr_t*)((uint8_t*)ipHeader + (ipHeader->ip_verHlen & 0x0F) * 4);
 
@@ -302,70 +321,49 @@ void printIPinfo ( const ipv4Hdr_t *ipHeader )
         uint16_t sequence_number = ntohs(*(uint16_t*)&icmp_header->icmp_line2[2]);
         uint16_t id_number = ntohs(*(uint16_t*)&icmp_header->icmp_line2);
 
-        printf("ICMP_HDR{ %-12s :id= %d, seq=%5d} ",
-            // TODO: Error check other types?
-            icmp_header->icmp_type == ICMP_ECHO_REQUEST ? "Echo Request" : "Echo Reply",
+        printf("ICMP_HDR{ ");
+
+        switch (icmp_header->icmp_type)
+        {
+        case ICMP_ECHO_REQUEST:
+            printf("%-12s ", "Echo Request");
+            break;
+        case ICMP_ECHO_REPLY:
+            printf("%-12s ", "Echo Reply");
+            break;
+        default:
+            printf("%-12s ", "TYPE ERROR");
+        }
+
+        printf(":id=%5d, seq=%5d} ",
             id_number,
             sequence_number
         );
 
         uint8_t icmp_hlen_bytes = (ipHeader->ip_verHlen & 0x0F) * 4;
-
         uint16_t icmp_total_len = ntohs(ipHeader->ip_totLen);
-
         uint16_t icmp_payload_len = icmp_total_len - icmp_hlen_bytes;
+        uint16_t icmp_data_len = icmp_payload_len - sizeof(icmpHdr_t);
 
-        uint16_t icmp_data_len = icmp_payload_len - sizeof(icmp_header);
-
-        printf("AppData=   %d", icmp_data_len);
-
+        printf("AppData=%5d", icmp_data_len);
 
         break;
     case PROTO_TCP:
-        printf("TCP      ");
 
-        printf("%s ",
-            ipHeaderToStr(ipHeader, ip_header_buffer)
-        );
-        // TO FIX
-        
+        // First half of 13th byte has the header length divided by 4
+        // int tcp_header_length = (*(uint8_t*)(start_of_data + 12) >> 4) * 4;
 
-        uint8_t tcp_hlen_bytes = (ipHeader->ip_verHlen & 0x0F) * 4;
+        // printf("AppData=%5d", ntohs(ipHeader->ip_totLen) - ip_header_len - tcp_header_length);
 
-        uint16_t tcp_total_len = ntohs(ipHeader->ip_totLen);
-
-        uint16_t tcp_payload_len = tcp_total_len - tcp_hlen_bytes;
-
-        printf("AppData=   %d", tcp_payload_len);
+        printf("AppData=    0");
 
         break;
 
     case PROTO_UDP:
-        printf("UDP      ");
+        // Length is a 16 bit number 4 bytes into the UDP header. Subtract 8 byte UDP header.
+        // printf("AppData=%5d", ntohs(*(uint16_t*)(start_of_data + 4)) - 8);
 
-        printf("%s ",
-            ipHeaderToStr(ipHeader, ip_header_buffer)
-        );
-
-        // TO FIX
-
-        uint8_t udp_hlen_bytes = (ipHeader->ip_verHlen & 0x0F) * 4;
-
-        uint16_t udp_total_len = ntohs(ipHeader->ip_totLen);
-
-        uint16_t udp_payload_len = udp_total_len - udp_hlen_bytes - 8;
-
-        printf("AppData=   %d", udp_payload_len);
-        
-
-        // hlen_bytes = (ipHeader->ip_verHlen & 0x0F) * 4;
-
-        // // Subtract from ethernet header size
-        // payload_len = p->incl_len - sizeof(etherHdr_t) - hlen_bytes;
-        
-        // data_len = payload_len - 8;
-
-        // printf("AppData=   %d", data_len);
+        printf("AppData=    0");
 
         break;
     
@@ -403,17 +401,4 @@ char *macToStr( const uint8_t *p , char *buf )
 {
     sprintf(buf, "%02x:%02x:%02x:%02x:%02x:%02x", p[0], p[1], p[2], p[3], p[4], p[5]);
     return buf;
-}
-
-/* headerStr needs to be at least 39 bytes long */
-char *ipHeaderToStr(const ipv4Hdr_t *ip_header , char *headerStr)
-{
-    int ip_header_len = (ip_header->ip_verHlen & 0x0F) * 4;
-
-    sprintf(headerStr, "IP_HDR{ Len=%d incl. %d options bytes}",
-        ip_header_len,
-        ip_header_len - 20
-    );
-
-    return headerStr;
 }
